@@ -54,6 +54,8 @@ int ** myUniverse;
 int * topGhost;
 int * bottomGhost;
 pthread_barrier_t barrier;
+long ** seeds;
+
 
 // You define these
 
@@ -65,7 +67,18 @@ pthread_barrier_t barrier;
 // You define these
 
 void computeGeneration(int id){
-    
+
+    for(int i = 0; i < SIZE/mpi_commsize/NUM_THREADS; i++){
+        // determine the RNG value for this row
+        SetInitialSeed();
+
+        for(int j = 0; j < SIZE; j++){
+
+            // if RNG < threshold, random alive/dead
+
+            // else follow rules
+        }
+    }
 }
 
 // function for threads
@@ -85,6 +98,7 @@ void main_conways(){
     MPI_Request sendBot;
     MPI_Request recvTop;
     MPI_Request recvBot;
+    bool mpi_flag;
 
     for(int tick = 0; tick < NUM_GENERATIONS; tick++){
         // send first row up
@@ -97,9 +111,34 @@ void main_conways(){
         MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, &recvBot);
 
         MPI_Wait(&sendTop, MPI_STATUS_IGNORE);
+        MPI_Test(&sendTop, &mpi_flag, MPI_STATUS_IGNORE);
+        if(!mpi_flag){
+            fprintf(stderr, "MPI error on send top\n");
+            exit(1);
+        }
+
         MPI_Wait(&sendBot, MPI_STATUS_IGNORE);
+        MPI_Test(&sendbot, &mpi_flag, MPI_STATUS_IGNORE);
+        if(!mpi_flag){
+            fprintf(stderr, "MPI error on send bottom\n");
+            exit(1);
+        }
+
         MPI_Wait(&recvTop, MPI_STATUS_IGNORE);
-        MPI_Wait(&recvTop, MPI_STATUS_IGNORE);
+        MPI_Test(&recvTop, &mpi_flag, MPI_STATUS_IGNORE);
+        if(!mpi_flag){
+            fprintf(stderr, "MPI error on recv top\n");
+            exit(1);
+        }
+
+
+        MPI_Wait(&recvBot, MPI_STATUS_IGNORE);
+        MPI_Test(&recvBot, &mpi_flag, MPI_STATUS_IGNORE);
+        if(!mpi_flag){
+            fprintf(stderr, "MPI error on recv bot\n");
+            exit(1);
+        }
+
 
         // synchronize threads
         pthread_barrier_wait(&barrier);
@@ -122,7 +161,11 @@ int main(int argc, char *argv[])
     
 // Init 32,768 RNG streams - each rank has an independent stream
     InitDefault();
-    
+    seeds = calloc(SIZE/mpi_commsize, sizeof(long*));
+    for(int i = 0; i < SIZE/mpi_commsize; i++){
+        seeds[i] = calloc(4, sizeof(long));
+    }
+
 // Note, used the mpi_myrank to select which RNG stream to use.
 // You must replace mpi_myrank with the right row being used.
 // This just show you how to call the RNG.    
@@ -156,8 +199,8 @@ int main(int argc, char *argv[])
         pthread_create(&my_threads[i], &attr, conways, (void *) &id);
     }
 
-
-// END -Perform a barrier and then leave MPI
+    main_conways();
+    // END -Perform a barrier and then leave MPI
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
     return 0;
