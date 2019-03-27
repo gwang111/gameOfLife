@@ -231,12 +231,16 @@ int main(int argc, char *argv[])
     MPI_Barrier( MPI_COMM_WORLD );
 
 // Insert your code
-    if(mpi_myrank == 0)
-        g_start_cycles = GetTimeBase();
-
-    pthread_t my_threads[NUM_THREADS];
+    
+    pthread_t my_threads[NUM_THREADS-1];
     pthread_attr_t attr;
     pthread_attr_init(&attr);
+
+    int *totalAliveCount;
+    if(mpi_myrank == 0){
+        totalAliveCount = calloc(NUM_GENERATIONS, sizeof(int));
+    }
+
 
     //initialize universe
     myUniverse = calloc(SIZE/mpi_commsize, sizeof(int*));
@@ -249,16 +253,54 @@ int main(int argc, char *argv[])
     topGhost = calloc(SIZE, sizeof(int));
     bottomGhost = calloc(SIZE, sizeof(int));
 
+    // begin timer
+    if(mpi_myrank == 0)
+        g_start_cycles = GetTimeBase();
+
+
     // create threads
-    for(int i = 1; i < NUM_THREADS; i++){
-        int id = i;
+    for(int i = 0; i < NUM_THREADS-1; i++){
+        int id = i+1;
         pthread_create(&my_threads[i], &attr, conways, (void *) &id);
     }
 
+
+
     main_conways();
     // Perform a barrier
-
+    for(int i = 0; i < NUM_THREADS-1; i++){
+        pthread_join(my_threads[i], NULL);
+    }
+    
     // Perform mpi_reduce on the alive count array
+    if(mpi_myrank == 0)
+        MPI_Reduce(
+            aliveCount,
+            totalAliveCount,
+            NUM_GENERATIONS,
+            MPI_INT,
+            MPI_SUM,
+            0,
+            MPI_COMM_WORLD
+            );
+    else
+        MPI_Reduce(
+            aliveCount,
+            NULL,
+            NUM_GENERATIONS,
+            MPI_INT,
+            MPI_SUM,
+            0,
+            MPI_COMM_WORLD
+            );
+
+
+    if(mpi_myrank == 0){
+        g_end_cycles = GetTimeBase();
+        g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
+
+    }
+
 
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
