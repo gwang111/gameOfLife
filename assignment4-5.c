@@ -98,16 +98,16 @@ void computeGeneration(int id){
                     aliveNeigh += topGhost[(j - 1) % SIZE];
                     aliveNeigh += topGhost[(j + 1) % SIZE];
                     aliveNeigh += topGhost[j % SIZE];
-                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[row - 1][j % SIZE];
+                    aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][j % SIZE];
                 } else if(id == (NUM_THREADS - 1)) { /* Needs to access bottom ghost row */
                     aliveNeigh += bottomGhost[(j - 1) % SIZE];
                     aliveNeigh += bottomGhost[(j + 1) % SIZE];
                     aliveNeigh += bottomGhost[j % SIZE];
-                    aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[row + 1][j % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][j % SIZE];
                 } else {
                     aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
                     aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
