@@ -71,6 +71,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 void computeGeneration(int id){
     int updatedTick[SIZE/mpi_commsize/NUM_THREADS][SIZE];
     int g; /* get global index */
+    int row;
     int aliveCounter = 0;
     int aliveNeigh = 0;
     int rowsPerRank = SIZE / mpi_commsize;
@@ -79,6 +80,7 @@ void computeGeneration(int id){
     double randVal = 0;
     for(int i = 0; i < rowsPerThread; i++){
         g = (id * rowsPerThread) + (rowsPerRank * mpi_myrank) + i;
+        row = (id * rowsPerThread) + i;
         for(int j = 0; j < SIZE; j++){ /* loop through all 32k cells */
             rngVal = GenVal(g); /* generate a random value [0, 1] for each cell */
 
@@ -90,29 +92,29 @@ void computeGeneration(int id){
                 //update live count for each gen
                 aliveCounter += randVal;
             } else {
-                aliveNeigh += myUniverse[i][(j - 1) % SIZE];
-                aliveNeigh += myUniverse[i][(j + 1) % SIZE];
+                aliveNeigh += myUniverse[row][(j - 1) % SIZE];
+                aliveNeigh += myUniverse[row][(j + 1) % SIZE];
                 if(id == 0) { /* Needs to access top ghost row */
                     aliveNeigh += topGhost[(j - 1) % SIZE];
                     aliveNeigh += topGhost[(j + 1) % SIZE];
                     aliveNeigh += topGhost[j % SIZE];
-                    aliveNeigh += myUniverse[i - 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[i - 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[i - 1][j % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][j % SIZE];
                 } else if(id == (NUM_THREADS - 1)) { /* Needs to access bottom ghost row */
                     aliveNeigh += bottomGhost[(j - 1) % SIZE];
                     aliveNeigh += bottomGhost[(j + 1) % SIZE];
                     aliveNeigh += bottomGhost[j % SIZE];
-                    aliveNeigh += myUniverse[i + 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[i + 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[i + 1][j % SIZE];
+                    aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][j % SIZE];
                 } else {
-                    aliveNeigh += myUniverse[i - 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[i - 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[i - 1][j % SIZE];
-                    aliveNeigh += myUniverse[i + 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[i + 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[i + 1][j % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][j % SIZE];
+                    aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][j % SIZE];
                 }
                 if(myUniverse[i][j] == ALIVE) {
                   if(aliveNeigh < 2 || aliveNeigh > 3) {
@@ -204,7 +206,6 @@ void main_conways(){
 
         // synchronize threads
         pthread_barrier_wait(&barrier);
-        pthread
 
         computeGeneration(0);
     }
@@ -234,7 +235,7 @@ int main(int argc, char *argv[])
     MPI_Barrier( MPI_COMM_WORLD );
 
 // Insert your code
-    
+
     pthread_t my_threads[NUM_THREADS-1];
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -275,7 +276,7 @@ int main(int argc, char *argv[])
     for(int i = 0; i < NUM_THREADS-1; i++){
         pthread_join(my_threads[i], NULL);
     }
-    
+
     // Perform mpi_reduce on the alive count array
     if(mpi_myrank == 0)
         MPI_Reduce(
@@ -313,7 +314,7 @@ int main(int argc, char *argv[])
     free(totalAliveCount);
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
-    } 
+    }
     free(myUniverse);
     free(topGhost);
     free(bottomGhost);
