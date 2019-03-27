@@ -204,6 +204,7 @@ void main_conways(){
 
         // synchronize threads
         pthread_barrier_wait(&barrier);
+        pthread
 
         computeGeneration(0);
     }
@@ -237,6 +238,7 @@ int main(int argc, char *argv[])
     pthread_t my_threads[NUM_THREADS-1];
     pthread_attr_t attr;
     pthread_attr_init(&attr);
+    pthread_barrier_init(&barrier, NULL, NUM_THREADS);
 
     int *totalAliveCount;
     if(mpi_myrank == 0){
@@ -315,6 +317,7 @@ int main(int argc, char *argv[])
     free(myUniverse);
     free(topGhost);
     free(bottomGhost);
+    pthread_barrier_destroy(&barrier);
 
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
