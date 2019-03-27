@@ -33,8 +33,8 @@
 #define ALIVE 1
 #define DEAD  0
 
-#define SIZE 1024
-#define NUM_THREADS 64
+#define SIZE 8
+#define NUM_THREADS 2
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 
@@ -50,7 +50,7 @@ unsigned long long g_end_cycles=0;
 int tick;
 int mpi_myrank;
 int mpi_commsize;
-int aliveCount[NUM_GENERATIONS] = {0};
+int aliveCount[NUM_GENERATIONS];
 int ** myUniverse;
 int * topGhost;
 int * bottomGhost;
@@ -150,6 +150,7 @@ void *conways(void * threadID){
     while(tick < NUM_GENERATIONS){
         pthread_barrier_wait(&barrier);
         computeGeneration(id);
+        printf("%d\n", tick);
     }
 
     pthread_exit(NULL);
@@ -246,6 +247,9 @@ int main(int argc, char *argv[])
         totalAliveCount = calloc(NUM_GENERATIONS, sizeof(int));
     }
 
+    for(int i = 0; i < NUM_GENERATIONS; ++i) {
+      aliveCount[i] = 0;
+    }
 
     //initialize universe
     myUniverse = calloc(SIZE/mpi_commsize, sizeof(int*));
