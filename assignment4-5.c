@@ -120,15 +120,28 @@ void computeGeneration(int id){
                   if(aliveNeigh < 2 || aliveNeigh > 3) {
                     myUniverse[i][j] = DEAD;
                   }
-                } else {
+                  else{
+                    myUniverse[i][j] = ALIVE;
+                  }
+                  // else still alive
+                } 
+                // if dead
+                else {
+                    // bring back to life if exactly 3 neighbors
                     if(aliveNeigh == 3) {
-                      myUniverse[i][j] = ALIVE;
+                        myUniverse[i][j] = ALIVE;
                     }
+                    else{
+                        myUniverse[i][j] = DEAD;
+                    }
+
                 }
+
                 aliveCounter += myUniverse[i][j];
             }
         }
     }
+
 
     pthread_mutex_lock(&mutex);
     aliveCount[tick] += aliveCounter;
@@ -150,7 +163,7 @@ void *conways(void * threadID){
     while(tick < NUM_GENERATIONS){
         pthread_barrier_wait(&barrier);
         computeGeneration(id);
-        printf("%d\n", tick);
+        printf("Tick %d\n", tick);
     }
 
     pthread_exit(NULL);
