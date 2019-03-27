@@ -13,7 +13,7 @@
 #include<errno.h>
 #include<math.h>
 
-#include<clcg4.h>
+#include "clcg4.h"
 
 #include<mpi.h>
 #include<pthread.h>
@@ -33,8 +33,8 @@
 #define ALIVE 1
 #define DEAD  0
 
-#define SIZE 8
-#define NUM_THREADS 2
+#define SIZE 1024
+#define NUM_THREADS 64
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 
@@ -90,40 +90,40 @@ void computeGeneration(int id){
                 //update live count for each gen
                 aliveCounter += randVal;
             } else {
-                aliveNeigh += universe[i][(j - 1) % SIZE];
-                aliveNeigh += universe[i][(j + 1) % SIZE];
+                aliveNeigh += myUniverse[i][(j - 1) % SIZE];
+                aliveNeigh += myUniverse[i][(j + 1) % SIZE];
                 if(id == 0) { /* Needs to access top ghost row */
-                    aliveNeigh += topGhost[0][(j - 1) % SIZE];
-                    aliveNeigh += topGhost[0][(j + 1) % SIZE];
-                    aliveNeigh += topGhost[0][j % SIZE];
-                    aliveNeigh += universe[i - 1][(j - 1) % SIZE];
-                    aliveNeigh += universe[i - 1][(j + 1) % SIZE];
-                    aliveNeigh += universe[i - 1][j % SIZE];
+                    aliveNeigh += topGhost[(j - 1) % SIZE];
+                    aliveNeigh += topGhost[(j + 1) % SIZE];
+                    aliveNeigh += topGhost[j % SIZE];
+                    aliveNeigh += myUniverse[i - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[i - 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[i - 1][j % SIZE];
                 } else if(id == (NUM_THREADS - 1)) { /* Needs to access bottom ghost row */
-                    aliveNeigh += bottomGhost[0][(j - 1) % SIZE];
-                    aliveNeigh += bottomGhost[0][(j + 1) % SIZE];
-                    aliveNeigh += bottomGhost[0][j % SIZE];
-                    aliveNeigh += universe[i + 1][(j - 1) % SIZE];
-                    aliveNeigh += universe[i + 1][(j + 1) % SIZE];
-                    aliveNeigh += universe[i + 1][j % SIZE];
+                    aliveNeigh += bottomGhost[(j - 1) % SIZE];
+                    aliveNeigh += bottomGhost[(j + 1) % SIZE];
+                    aliveNeigh += bottomGhost[j % SIZE];
+                    aliveNeigh += myUniverse[i + 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[i + 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[i + 1][j % SIZE];
                 } else {
-                    aliveNeigh += universe[i - 1][(j - 1) % SIZE];
-                    aliveNeigh += universe[i - 1][(j + 1) % SIZE];
-                    aliveNeigh += universe[i - 1][j % SIZE];
-                    aliveNeigh += universe[i + 1][(j - 1) % SIZE];
-                    aliveNeigh += universe[i + 1][(j + 1) % SIZE];
-                    aliveNeigh += universe[i + 1][j % SIZE];
+                    aliveNeigh += myUniverse[i - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[i - 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[i - 1][j % SIZE];
+                    aliveNeigh += myUniverse[i + 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[i + 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[i + 1][j % SIZE];
                 }
-                if(universe[i][j] == ALIVE) {
+                if(myUniverse[i][j] == ALIVE) {
                   if(aliveNeigh < 2 || aliveNeigh > 3) {
-                    universe[i][j] = DEAD;
+                    myUniverse[i][j] = DEAD;
                   }
                 } else {
                     if(aliveNeigh == 3) {
-                      universe[i][j] = ALIVE;
+                      myUniverse[i][j] = ALIVE;
                     }
                 }
-                aliveCounter += universe[i][j];
+                aliveCounter += myUniverse[i][j];
             }
         }
     }
@@ -135,20 +135,22 @@ void computeGeneration(int id){
     pthread_barrier_wait(&barrier);
     for(int i = 0; i < rowsPerThread; i++) {
       for(int j = 0; j < SIZE; j++) {
-        universe[id * rowsPerThread + i][j] = updatedTick[i][j];
+        myUniverse[id * rowsPerThread + i][j] = updatedTick[i][j];
       }
     }
 }
 
 // function for threads
-void conways(void * threadID){
-    int id = (int) threadID;
+void *conways(void * threadID){
+    int id = *(int*) threadID;
 
     // loop over all generations
     while(tick < NUM_GENERATIONS){
         pthread_barrier_wait(&barrier);
         computeGeneration(id);
     }
+
+    pthread_exit(NULL);
 }
 
 // function for main thread
@@ -157,7 +159,7 @@ void main_conways(){
     MPI_Request sendBot;
     MPI_Request recvTop;
     MPI_Request recvBot;
-    bool mpi_flag;
+    int mpi_flag;
 
     for(tick = 0; tick < NUM_GENERATIONS; tick++){
 
@@ -166,9 +168,9 @@ void main_conways(){
         // send last row down
         MPI_Isend(myUniverse[SIZE/mpi_commsize-1], SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendBot);
         // receive top ghost
-        MPI_Irecv(topGhost, SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, &recvTop);
+        MPI_Irecv(topGhost, SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, &recvTop);
         // receive bottom ghost
-        MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, &recvBot);
+        MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &recvBot);
 
         MPI_Wait(&sendTop, MPI_STATUS_IGNORE);
         MPI_Test(&sendTop, &mpi_flag, MPI_STATUS_IGNORE);
@@ -178,7 +180,7 @@ void main_conways(){
         }
 
         MPI_Wait(&sendBot, MPI_STATUS_IGNORE);
-        MPI_Test(&sendbot, &mpi_flag, MPI_STATUS_IGNORE);
+        MPI_Test(&sendBot, &mpi_flag, MPI_STATUS_IGNORE);
         if(!mpi_flag){
             fprintf(stderr, "MPI error on send bottom\n");
             exit(1);
@@ -296,11 +298,23 @@ int main(int argc, char *argv[])
 
 
     if(mpi_myrank == 0){
+
+        for(int i = 0; i < NUM_GENERATIONS; i++){
+            printf("Generation %d: %d alive\n", i, totalAliveCount[i]);
+        }
+
         g_end_cycles = GetTimeBase();
         g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
-
     }
 
+
+    free(totalAliveCount);
+    for(int i = 0; i < SIZE/mpi_commsize; i++){
+        free(myUniverse[i]);
+    } 
+    free(myUniverse);
+    free(topGhost);
+    free(bottomGhost);
 
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
