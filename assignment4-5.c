@@ -77,7 +77,7 @@ void computeGeneration(int id){
     int rowsPerRank = SIZE / mpi_commsize;
     int rowsPerThread = rowsPerRank / NUM_THREADS;
     double rngVal = 0;
-    double randVal = 0;
+    int randVal = 0;
     for(int i = 0; i < rowsPerThread; i++){
         g = (id * rowsPerThread) + (rowsPerRank * mpi_myrank) + i;
         row = (id * rowsPerThread) + i;
@@ -163,7 +163,6 @@ void *conways(void * threadID){
     while(tick < NUM_GENERATIONS){
         pthread_barrier_wait(&barrier);
         computeGeneration(id);
-        printf("Tick %d\n", tick);
     }
 
     pthread_exit(NULL);
