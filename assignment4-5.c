@@ -23,7 +23,7 @@
 #ifdef BGQ
 #include<hwi/include/bqc/A2_inlines.h>
 #else
-#define GetTimeBase MPI_Wtime            
+#define GetTimeBase MPI_Wtime
 #endif
 
 /***************************************************************************/
@@ -47,14 +47,16 @@ double g_processor_frequency = 1600000000.0; // processing speed for BG/Q
 unsigned long long g_start_cycles=0;
 unsigned long long g_end_cycles=0;
 
+int tick;
 int mpi_myrank;
 int mpi_commsize;
-int aliveCount[NUM_GENERATIONS];
+int aliveCount[NUM_GENERATIONS] = {0};
 int ** myUniverse;
 int * topGhost;
 int * bottomGhost;
 pthread_barrier_t barrier;
-long ** seeds;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+//long ** seeds;
 
 
 // You define these
@@ -67,17 +69,74 @@ long ** seeds;
 // You define these
 
 void computeGeneration(int id){
-
-    for(int i = 0; i < SIZE/mpi_commsize/NUM_THREADS; i++){
-        // determine the RNG value for this row
-        SetInitialSeed();
-
-        for(int j = 0; j < SIZE; j++){
+    int updatedTick[SIZE/mpi_commsize/NUM_THREADS][SIZE];
+    int g; /* get global index */
+    int aliveCounter = 0;
+    int aliveNeigh = 0;
+    int rowsPerRank = SIZE / mpi_commsize;
+    int rowsPerThread = rowsPerRank / NUM_THREADS;
+    double rngVal = 0;
+    double randVal = 0;
+    for(int i = 0; i < rowsPerThread; i++){
+        g = (id * rowsPerThread) + (rowsPerRank * mpi_myrank) + i;
+        for(int j = 0; j < SIZE; j++){ /* loop through all 32k cells */
+            rngVal = GenVal(g); /* generate a random value [0, 1] for each cell */
 
             // if RNG < threshold, random alive/dead
-
-            // else follow rules
+            if(rngVal < THRESHOLD) {
+                //random pick between LIVE or DEAD
+                randVal = rand() % 2;
+                updatedTick[i][j] = randVal;
+                //update live count for each gen
+                aliveCounter += randVal;
+            } else {
+                aliveNeigh += universe[i][(j - 1) % SIZE];
+                aliveNeigh += universe[i][(j + 1) % SIZE];
+                if(id == 0) { /* Needs to access top ghost row */
+                    aliveNeigh += topGhost[0][(j - 1) % SIZE];
+                    aliveNeigh += topGhost[0][(j + 1) % SIZE];
+                    aliveNeigh += topGhost[0][j % SIZE];
+                    aliveNeigh += universe[i - 1][(j - 1) % SIZE];
+                    aliveNeigh += universe[i - 1][(j + 1) % SIZE];
+                    aliveNeigh += universe[i - 1][j % SIZE];
+                } else if(id == (NUM_THREADS - 1)) { /* Needs to access bottom ghost row */
+                    aliveNeigh += bottomGhost[0][(j - 1) % SIZE];
+                    aliveNeigh += bottomGhost[0][(j + 1) % SIZE];
+                    aliveNeigh += bottomGhost[0][j % SIZE];
+                    aliveNeigh += universe[i + 1][(j - 1) % SIZE];
+                    aliveNeigh += universe[i + 1][(j + 1) % SIZE];
+                    aliveNeigh += universe[i + 1][j % SIZE];
+                } else {
+                    aliveNeigh += universe[i - 1][(j - 1) % SIZE];
+                    aliveNeigh += universe[i - 1][(j + 1) % SIZE];
+                    aliveNeigh += universe[i - 1][j % SIZE];
+                    aliveNeigh += universe[i + 1][(j - 1) % SIZE];
+                    aliveNeigh += universe[i + 1][(j + 1) % SIZE];
+                    aliveNeigh += universe[i + 1][j % SIZE];
+                }
+                if(universe[i][j] == ALIVE) {
+                  if(aliveNeigh < 2 || aliveNeigh > 3) {
+                    universe[i][j] = DEAD;
+                  }
+                } else {
+                    if(aliveNeigh == 3) {
+                      universe[i][j] = ALIVE;
+                    }
+                }
+                aliveCounter += universe[i][j];
+            }
         }
+    }
+
+    pthread_mutex_lock(&mutex);
+    aliveCount[tick] += aliveCounter;
+    pthread_mutex_unlock(&mutex);
+
+    pthread_barrier_wait(&barrier);
+    for(int i = 0; i < rowsPerThread; i++) {
+      for(int j = 0; j < SIZE; j++) {
+        universe[id * rowsPerThread + i][j] = updatedTick[i][j];
+      }
     }
 }
 
@@ -86,7 +145,7 @@ void conways(void * threadID){
     int id = (int) threadID;
 
     // loop over all generations
-    for(int tick = 0; tick < NUM_GENERATIONS; tick++){
+    while(tick < NUM_GENERATIONS){
         pthread_barrier_wait(&barrier);
         computeGeneration(id);
     }
@@ -100,7 +159,8 @@ void main_conways(){
     MPI_Request recvBot;
     bool mpi_flag;
 
-    for(int tick = 0; tick < NUM_GENERATIONS; tick++){
+    for(tick = 0; tick < NUM_GENERATIONS; tick++){
+
         // send first row up
         MPI_Isend(myUniverse[0], SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendTop);
         // send last row down
@@ -144,7 +204,7 @@ void main_conways(){
         pthread_barrier_wait(&barrier);
 
         computeGeneration(0);
-    }   
+    }
 }
 
 /***************************************************************************/
@@ -158,22 +218,18 @@ int main(int argc, char *argv[])
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
-    
+
 // Init 32,768 RNG streams - each rank has an independent stream
     InitDefault();
-    seeds = calloc(SIZE/mpi_commsize, sizeof(long*));
-    for(int i = 0; i < SIZE/mpi_commsize; i++){
-        seeds[i] = calloc(4, sizeof(long));
-    }
 
 // Note, used the mpi_myrank to select which RNG stream to use.
 // You must replace mpi_myrank with the right row being used.
-// This just show you how to call the RNG.    
-    //printf("Rank %d of %d has been started and a first Random Value of %lf\n", 
+// This just show you how to call the RNG.
+    //printf("Rank %d of %d has been started and a first Random Value of %lf\n",
 	//   mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
-    
+
     MPI_Barrier( MPI_COMM_WORLD );
-    
+
 // Insert your code
     if(mpi_myrank == 0)
         g_start_cycles = GetTimeBase();
@@ -200,7 +256,10 @@ int main(int argc, char *argv[])
     }
 
     main_conways();
-    // END -Perform a barrier and then leave MPI
+    // Perform a barrier
+
+    // Perform mpi_reduce on the alive count array
+
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
     return 0;
