@@ -77,7 +77,7 @@ void computeGeneration(int id){
     int rowsPerRank = SIZE / mpi_commsize;
     int rowsPerThread = rowsPerRank / NUM_THREADS;
     double rngVal = 0;
-    double randVal = 0;
+    int randVal = 0;
     for(int i = 0; i < rowsPerThread; i++){
         g = (id * rowsPerThread) + (rowsPerRank * mpi_myrank) + i;
         row = (id * rowsPerThread) + i;
@@ -88,6 +88,7 @@ void computeGeneration(int id){
             if(rngVal < THRESHOLD) {
                 //random pick between LIVE or DEAD
                 randVal = rand() % 2;
+                printf("%d\n", randVal);
                 updatedTick[i][j] = randVal;
                 //update live count for each gen
                 aliveCounter += randVal;
@@ -150,7 +151,6 @@ void *conways(void * threadID){
     while(tick < NUM_GENERATIONS){
         pthread_barrier_wait(&barrier);
         computeGeneration(id);
-        printf("%d\n", tick);
     }
 
     pthread_exit(NULL);
