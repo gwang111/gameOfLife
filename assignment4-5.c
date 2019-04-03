@@ -160,6 +160,7 @@ void *conways(void * threadID){
 
     // loop over all generations
     for(int tick = 0; tick < NUM_GENERATIONS; tick++){
+        MPI_Barrier(MPI_COMM_WORLD);
         pthread_barrier_wait(&barrier);
         computeGeneration(id, tick);
     }
@@ -175,7 +176,7 @@ void main_conways(){
     int mpi_flag;
 
     for(int tick = 0; tick < NUM_GENERATIONS; tick++){
-
+        MPI_Barrier(MPI_COMM_WORLD);
         // send first row up
         MPI_Isend(myUniverse[0], SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendTop);
         // send last row down
@@ -213,7 +214,6 @@ void main_conways(){
             fprintf(stderr, "MPI error on recv bot\n");
             exit(1);
         }
-
 
         // synchronize threads
         pthread_barrier_wait(&barrier);
@@ -282,10 +282,8 @@ int main(int argc, char *argv[])
         int id = i+1;
         pthread_create(&my_threads[i], &attr, conways, (void *) &id);
     }
-
-
-
     main_conways();
+
     // Perform a barrier
     for(int i = 0; i < NUM_THREADS-1; i++){
         pthread_join(my_threads[i], NULL);
