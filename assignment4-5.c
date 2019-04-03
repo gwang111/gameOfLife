@@ -47,7 +47,6 @@ double g_processor_frequency = 1600000000.0; // processing speed for BG/Q
 unsigned long long g_start_cycles=0;
 unsigned long long g_end_cycles=0;
 
-int tick;
 int mpi_myrank;
 int mpi_commsize;
 int aliveCount[NUM_GENERATIONS];
@@ -68,7 +67,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // You define these
 
-void computeGeneration(int id){
+void computeGeneration(int id, int tick){
     int updatedTick[SIZE/mpi_commsize/NUM_THREADS][SIZE];
     int g; /* get global index */
     int row;
@@ -146,8 +145,8 @@ void computeGeneration(int id){
     pthread_mutex_lock(&mutex);
     aliveCount[tick] += aliveCounter;
     pthread_mutex_unlock(&mutex);
-
     pthread_barrier_wait(&barrier);
+
     for(int i = 0; i < rowsPerThread; i++) {
       for(int j = 0; j < SIZE; j++) {
         myUniverse[id * rowsPerThread + i][j] = updatedTick[i][j];
@@ -160,11 +159,10 @@ void *conways(void * threadID){
     int id = *(int*) threadID;
 
     // loop over all generations
-    while(tick < NUM_GENERATIONS){
+    for(int tick = 0; tick < NUM_GENERATIONS; tick++){
         pthread_barrier_wait(&barrier);
-        computeGeneration(id);
+        computeGeneration(id, tick);
     }
-
     pthread_exit(NULL);
 }
 
@@ -176,7 +174,7 @@ void main_conways(){
     MPI_Request recvBot;
     int mpi_flag;
 
-    for(tick = 0; tick < NUM_GENERATIONS; tick++){
+    for(int tick = 0; tick < NUM_GENERATIONS; tick++){
 
         // send first row up
         MPI_Isend(myUniverse[0], SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendTop);
@@ -220,7 +218,7 @@ void main_conways(){
         // synchronize threads
         pthread_barrier_wait(&barrier);
 
-        computeGeneration(0);
+        computeGeneration(0, tick);
     }
 }
 
