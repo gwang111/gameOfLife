@@ -327,8 +327,9 @@ int main(int argc, char *argv[])
         g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
     }
 
-
-    free(totalAliveCount);
+    if(mpi_myrank == 0)
+        free(totalAliveCount);
+    
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
     }
