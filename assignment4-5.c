@@ -77,9 +77,11 @@ void computeGeneration(int id, int tick){
     int rowsPerThread = rowsPerRank / NUM_THREADS;
     double rngVal = 0;
     int randVal = 0;
+
     for(int i = 0; i < rowsPerThread; i++){
         g = (id * rowsPerThread) + (rowsPerRank * mpi_myrank) + i;
         row = (id * rowsPerThread) + i;
+
         for(int j = 0; j < SIZE; j++){ /* loop through all 32k cells */
             rngVal = GenVal(g); /* generate a random value [0, 1] for each cell */
 
@@ -91,36 +93,38 @@ void computeGeneration(int id, int tick){
                 //update live count for each gen
                 aliveCounter += randVal;
             } else {
+                // side neighbors
                 aliveNeigh += myUniverse[row][(j - 1) % SIZE];
                 aliveNeigh += myUniverse[row][(j + 1) % SIZE];
-                if(id == 0) { /* Needs to access top ghost row */
+                // top neighbors
+                if(id == 0 && i == 0){ /* Needs to access top ghost row */
                     aliveNeigh += topGhost[(j - 1) % SIZE];
                     aliveNeigh += topGhost[(j + 1) % SIZE];
                     aliveNeigh += topGhost[j % SIZE];
-                    aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[row + 1][j % SIZE];
-                } else if(id == (NUM_THREADS - 1)) { /* Needs to access bottom ghost row */
+                }
+                else{
+                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][j % SIZE];
+                }
+                // bottom neighbors
+                if(id == NUM_THREADS-1 && i == rowsPerThread-1){ /* Needs to access bottom ghost row */
                     aliveNeigh += bottomGhost[(j - 1) % SIZE];
                     aliveNeigh += bottomGhost[(j + 1) % SIZE];
                     aliveNeigh += bottomGhost[j % SIZE];
-                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[row - 1][j % SIZE];
-                } else {
-                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
-                    aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
-                    aliveNeigh += myUniverse[row - 1][j % SIZE];
+                }
+                else{
                     aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
                     aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
                     aliveNeigh += myUniverse[row + 1][j % SIZE];
                 }
+                
                 if(myUniverse[i][j] == ALIVE) {
                   if(aliveNeigh < 2 || aliveNeigh > 3) {
-                    myUniverse[i][j] = DEAD;
+                    updatedTick[i][j] = DEAD;
                   }
                   else{
-                    myUniverse[i][j] = ALIVE;
+                    updatedTick[i][j] = ALIVE;
                   }
                   // else still alive
                 } 
@@ -128,19 +132,18 @@ void computeGeneration(int id, int tick){
                 else {
                     // bring back to life if exactly 3 neighbors
                     if(aliveNeigh == 3) {
-                        myUniverse[i][j] = ALIVE;
+                        updatedTick[i][j] = ALIVE;
                     }
                     else{
-                        myUniverse[i][j] = DEAD;
+                        updatedTick[i][j] = DEAD;
                     }
 
                 }
 
-                aliveCounter += myUniverse[i][j];
+                aliveCounter += updatedTick[i][j];
             }
         }
     }
-
 
     pthread_mutex_lock(&mutex);
     aliveCount[tick] += aliveCounter;
@@ -217,7 +220,6 @@ void main_conways(){
 
         // synchronize threads
         pthread_barrier_wait(&barrier);
-
         computeGeneration(0, tick);
     }
 }
@@ -242,11 +244,9 @@ int main(int argc, char *argv[])
 // This just show you how to call the RNG.
     //printf("Rank %d of %d has been started and a first Random Value of %lf\n",
 	//   mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
-
     MPI_Barrier( MPI_COMM_WORLD );
 
 // Insert your code
-
     pthread_t my_threads[NUM_THREADS-1];
     pthread_attr_t attr;
     pthread_attr_init(&attr);
