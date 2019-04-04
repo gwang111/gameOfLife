@@ -34,7 +34,7 @@
 #define DEAD  0
 
 #define SIZE 8
-#define NUM_THREADS 2
+#define NUM_THREADS 1
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 
@@ -67,6 +67,13 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // You define these
 
+// compute a % b
+int mod(int a, int b){
+    while(a < 0)
+        a += b;
+    return a % b;
+}
+
 void computeGeneration(int id, int tick){
     int updatedTick[SIZE/mpi_commsize/NUM_THREADS][SIZE];
     int g; /* get global index */
@@ -94,27 +101,27 @@ void computeGeneration(int id, int tick){
                 aliveCounter += randVal;
             } else {
                 // side neighbors
-                aliveNeigh += myUniverse[row][(j - 1) % SIZE];
+                aliveNeigh += myUniverse[row][mod(j-1, SIZE)];
                 aliveNeigh += myUniverse[row][(j + 1) % SIZE];
                 // top neighbors
                 if(id == 0 && i == 0){ /* Needs to access top ghost row */
-                    aliveNeigh += topGhost[(j - 1) % SIZE];
+                    aliveNeigh += topGhost[mod(j-1, SIZE)];
                     aliveNeigh += topGhost[(j + 1) % SIZE];
                     aliveNeigh += topGhost[j % SIZE];
                 }
                 else{
-                    aliveNeigh += myUniverse[row - 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row - 1][mod(j-1, SIZE)];
                     aliveNeigh += myUniverse[row - 1][(j + 1) % SIZE];
                     aliveNeigh += myUniverse[row - 1][j % SIZE];
                 }
                 // bottom neighbors
                 if(id == NUM_THREADS-1 && i == rowsPerThread-1){ /* Needs to access bottom ghost row */
-                    aliveNeigh += bottomGhost[(j - 1) % SIZE];
+                    aliveNeigh += bottomGhost[mod(j-1, SIZE)];
                     aliveNeigh += bottomGhost[(j + 1) % SIZE];
                     aliveNeigh += bottomGhost[j % SIZE];
                 }
                 else{
-                    aliveNeigh += myUniverse[row + 1][(j - 1) % SIZE];
+                    aliveNeigh += myUniverse[row + 1][mod(j-1, SIZE)];
                     aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
                     aliveNeigh += myUniverse[row + 1][j % SIZE];
                 }
@@ -180,14 +187,36 @@ void main_conways(){
 
     for(int tick = 0; tick < NUM_GENERATIONS; tick++){
         MPI_Barrier(MPI_COMM_WORLD);
+/*
+        if(mpi_myrank % 2 == 0){
+            MPI_Send(myUniverse[0], SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD); // send up
+            printf("%d sent up to %d\n", mpi_myrank, (mpi_myrank-1)%mpi_commsize);
+            MPI_Send(myUniverse[SIZE/mpi_commsize-1], SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD); // send down
+            printf("%d sent down to %d\n", mpi_myrank, (mpi_myrank+1)%mpi_commsize);
+            MPI_Recv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); //recv bot
+            printf("%d recv bot\n", mpi_myrank);
+            MPI_Recv(topGhost, SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // recv top
+            printf("%d recv top\n", mpi_myrank);
+        }
+        else{
+            MPI_Recv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); //recv bot
+            printf("%d recv bot\n", mpi_myrank);
+            MPI_Recv(topGhost, SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // recv top
+            printf("%d recv top\n", mpi_myrank);
+            MPI_Send(myUniverse[0], SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD); // send up
+            printf("%d sent up\n", mpi_myrank);
+            MPI_Send(myUniverse[SIZE/mpi_commsize-1], SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD); // send down
+            printf("%d sent down\n", mpi_myrank);
+        }*/
+
         // send first row up
-        MPI_Isend(myUniverse[0], SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendTop);
+        MPI_Isend(myUniverse[0], SIZE, MPI_INT, mod(mpi_myrank-1, mpi_commsize), 0, MPI_COMM_WORLD, &sendTop);
+        // receive bottom ghost
+        MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &recvBot);
         // send last row down
         MPI_Isend(myUniverse[SIZE/mpi_commsize-1], SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendBot);
         // receive top ghost
-        MPI_Irecv(topGhost, SIZE, MPI_INT, (mpi_myrank-1)%mpi_commsize, 0, MPI_COMM_WORLD, &recvTop);
-        // receive bottom ghost
-        MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &recvBot);
+        MPI_Irecv(topGhost, SIZE, MPI_INT, mod(mpi_myrank-1, mpi_commsize), 0, MPI_COMM_WORLD, &recvTop);
 
         MPI_Wait(&sendTop, MPI_STATUS_IGNORE);
         MPI_Test(&sendTop, &mpi_flag, MPI_STATUS_IGNORE);
@@ -195,22 +224,18 @@ void main_conways(){
             fprintf(stderr, "MPI error on send top\n");
             exit(1);
         }
-
         MPI_Wait(&sendBot, MPI_STATUS_IGNORE);
         MPI_Test(&sendBot, &mpi_flag, MPI_STATUS_IGNORE);
         if(!mpi_flag){
             fprintf(stderr, "MPI error on send bottom\n");
             exit(1);
         }
-
         MPI_Wait(&recvTop, MPI_STATUS_IGNORE);
         MPI_Test(&recvTop, &mpi_flag, MPI_STATUS_IGNORE);
         if(!mpi_flag){
             fprintf(stderr, "MPI error on recv top\n");
             exit(1);
         }
-
-
         MPI_Wait(&recvBot, MPI_STATUS_IGNORE);
         MPI_Test(&recvBot, &mpi_flag, MPI_STATUS_IGNORE);
         if(!mpi_flag){
@@ -229,8 +254,7 @@ void main_conways(){
 /***************************************************************************/
 
 int main(int argc, char *argv[])
-{
-
+{  
 // Example MPI startup and using CLCG4 RNG
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
