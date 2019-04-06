@@ -332,27 +332,16 @@ int main(int argc, char *argv[])
         free(totalAliveCount);
     
     MPI_File cFile;
-    char outBuffer[(SIZE * SIZE) / mpi_commsize + (SIZE/mpi_commsize)];
     MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
-
-    int outI = 0;
-    for(int i = 0; i < SIZE/mpi_commsize; i++) {
-        for(int j = 0; j < SIZE; j++) {
-            printf("%d ", myUniverse[i][j]);
-            outBuffer[outI] = (char)myUniverse[i][j];
-            ++outI;
-        }
-        printf("\n");
-        outBuffer[outI] = '\n';
-        ++outI;
+    for(int line = 0; line < SIZE/mpi_commsize; line++){
+        MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + line) * (SIZE+1);
+        char row[SIZE+1];
+        for(int i = 0; i < SIZE; i ++)
+            row[i] = myUniverse[line][i] + '0';
+        row[SIZE] = '\n';
+        MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
     }
-    outBuffer[outI - 1] = '\0';
-    printf("%d", strlen(outBuffer)); 
 
-    MPI_File_write_at(cFile, mpi_myrank * (SIZE/mpi_commsize), outBuffer, strlen(outBuffer), MPI_CHAR, MPI_STATUS_IGNORE);
-
-
-    MPI_File_close(&cFile);
 
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
