@@ -34,7 +34,7 @@
 #define DEAD  0
     
 #define SIZE 8
-#define NUM_THREADS 4      
+#define NUM_THREADS 2      
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 
@@ -325,11 +325,35 @@ int main(int argc, char *argv[])
 
         g_end_cycles = GetTimeBase();
         g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
+        printf("%f\n", g_time_in_secs);
     }
 
     if(mpi_myrank == 0)
         free(totalAliveCount);
     
+    MPI_File cFile;
+    char outBuffer[(SIZE * SIZE) / mpi_commsize + (SIZE/mpi_commsize)];
+    MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
+
+    int outI = 0;
+    for(int i = 0; i < SIZE/mpi_commsize; i++) {
+        for(int j = 0; j < SIZE; j++) {
+            printf("%d ", myUniverse[i][j]);
+            outBuffer[outI] = (char)myUniverse[i][j];
+            ++outI;
+        }
+        printf("\n");
+        outBuffer[outI] = '\n';
+        ++outI;
+    }
+    outBuffer[outI - 1] = '\0';
+    printf("%d", strlen(outBuffer)); 
+
+    MPI_File_write_at(cFile, mpi_myrank * (SIZE/mpi_commsize), outBuffer, strlen(outBuffer), MPI_CHAR, MPI_STATUS_IGNORE);
+
+
+    MPI_File_close(&cFile);
+
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
     }
