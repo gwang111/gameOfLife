@@ -32,13 +32,13 @@
 
 #define ALIVE 1
 #define DEAD  0
-    
+
 #define SIZE 32768
 #define NUM_THREADS 1
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 #define PARALLEL_IO 0
-#define HEATMAP 0
+#define HEATMAP 1
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -131,7 +131,7 @@ void computeGeneration(int id, int tick){
                     aliveNeigh += myUniverse[row + 1][(j + 1) % SIZE];
                     aliveNeigh += myUniverse[row + 1][j % SIZE];
                 }
-                
+
                 if(myUniverse[i][j] == ALIVE) {
                   if(aliveNeigh < 2 || aliveNeigh > 3) {
                     updatedTick[i][j] = DEAD;
@@ -140,7 +140,7 @@ void computeGeneration(int id, int tick){
                     updatedTick[i][j] = ALIVE;
                   }
                   // else still alive
-                } 
+                }
                 // if dead
                 else {
                     // bring back to life if exactly 3 neighbors
@@ -157,7 +157,7 @@ void computeGeneration(int id, int tick){
             }
         }
     }
-    
+
     pthread_mutex_lock(&mutex);
     aliveCount[tick] += aliveCounter;
     pthread_mutex_unlock(&mutex);
@@ -243,7 +243,7 @@ void main_conways(){
 /***************************************************************************/
 
 int main(int argc, char *argv[])
-{  
+{
 // Example MPI startup and using CLCG4 RNG
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
@@ -338,7 +338,7 @@ int main(int argc, char *argv[])
 
     if(mpi_myrank == 0)
         free(totalAliveCount);
-    
+
     /* PARALLEL I/O */
     if(PARALLEL_IO){
         // begin timer
@@ -363,10 +363,28 @@ int main(int argc, char *argv[])
             printf("I/O: %f\n", g_time_in_secs);
         }
     }
-    
+
     /* HEATMAP */
     if(HEATMAP){
-        // gary's code here
+        MPI_File hFile;
+        MPI_File_open(MPI_COMM_WORLD, "heatMap.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &hFile);
+        int hI = 0;
+        int hJ = 0;
+        for(int i = 0; i < SIZE/mpi_commsize; i += 32, hI++) {
+            MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + hI) * (SIZE/32);
+            int row[SIZE/32];
+            for(int j = 0; j < SIZE; j += 32, hJ++) {
+                int count = 0;
+                for(int k = i; k < (i + 32); k++) {
+                    for(int l = j; l < (j + 32); l++) {
+                        count += myUniverse[k][l];
+                    }
+                }
+                row[hJ] = count;
+            }
+            MPI_File_write_at(hFile, offset, row, SIZE/32 * sizeof(int), MPI_INT, MPI_STATUS_IGNORE);
+            hJ = 0;
+        }
     }
 
     for(int i = 0; i < SIZE/mpi_commsize; i++){
