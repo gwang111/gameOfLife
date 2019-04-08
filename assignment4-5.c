@@ -163,11 +163,16 @@ void computeGeneration(int id, int tick){
     pthread_mutex_unlock(&mutex);
     pthread_barrier_wait(&barrier);
 
+
+
     for(int i = 0; i < rowsPerThread; i++) {
       for(int j = 0; j < SIZE; j++) {
         myUniverse[id * rowsPerThread + i][j] = updatedTick[i][j];
       }
     }
+if(tick == 255 && mpi_myrank == 0){
+    printf("hi %d\n", id);
+}
 
     for(int i = 0; i < rowsPerThread; i++)
         free(updatedTick[i]);
@@ -291,9 +296,11 @@ int main(int argc, char *argv[])
 
 
     // create threads
+    int ids[NUM_THREADS];
+
     for(int i = 0; i < NUM_THREADS-1; i++){
-        int id = i+1;
-        pthread_create(&my_threads[i], &attr, conways, (void *) &id);
+        ids[i] = i+1;
+        pthread_create(&my_threads[i], &attr, conways, (void *) &ids[i]);
     }
     main_conways();
 
