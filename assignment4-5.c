@@ -33,12 +33,12 @@
 #define ALIVE 1
 #define DEAD  0
 
-#define SIZE 32
-#define NUM_THREADS 4
+#define SIZE 1024
+#define NUM_THREADS 8
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 #define PARALLEL_IO 1
-#define HEATMAP 0
+#define HEATMAP 1
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
     for(int i = 0; i < NUM_THREADS-1; i++){
         pthread_join(my_threads[i], NULL);
     }
-    
+
     // Perform mpi_reduce on the alive count array
     if(mpi_myrank == 0)
         MPI_Reduce(
@@ -387,11 +387,6 @@ int main(int argc, char *argv[])
                 }
                 sum += myUniverse[row][i];
             }
-        }
-        if(mpi_myrank == 0){
-            for(int i = 0; i < (SIZE/32)*(SIZE/mpi_commsize); i++)
-                printf("%d ", myReduced[i]);
-            printf("\n");
         }
 
         int * reduced = NULL;
