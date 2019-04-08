@@ -33,8 +33,8 @@
 #define ALIVE 1
 #define DEAD  0
     
-#define SIZE 8
-#define NUM_THREADS 2      
+#define SIZE 32768
+#define NUM_THREADS 1
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 
@@ -75,13 +75,15 @@ int mod(int a, int b){
 }
 
 void computeGeneration(int id, int tick){
-    int updatedTick[SIZE/mpi_commsize/NUM_THREADS][SIZE];
     int g; /* get global index */
     int row;
     int aliveCounter = 0;
     int aliveNeigh = 0;
     int rowsPerRank = SIZE / mpi_commsize;
     int rowsPerThread = rowsPerRank / NUM_THREADS;
+    int ** updatedTick = calloc(rowsPerThread, sizeof(int *));
+    for(int i = 0; i < rowsPerThread; i++)
+        updatedTick[i] = calloc(SIZE, sizeof(int));
     double rngVal = 0;
     int randVal = 0;
 
@@ -164,6 +166,10 @@ void computeGeneration(int id, int tick){
         myUniverse[id * rowsPerThread + i][j] = updatedTick[i][j];
       }
     }
+
+    for(int i = 0; i < rowsPerThread; i++)
+        free(updatedTick[i]);
+    free(updatedTick);
 }
 
 // function for threads
@@ -342,6 +348,7 @@ int main(int argc, char *argv[])
         MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
     }
 
+    MPI_File_close(&cFile);
 
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
