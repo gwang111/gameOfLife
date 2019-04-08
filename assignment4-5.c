@@ -170,9 +170,6 @@ void computeGeneration(int id, int tick){
         myUniverse[id * rowsPerThread + i][j] = updatedTick[i][j];
       }
     }
-if(tick == 255 && mpi_myrank == 0){
-    printf("hi %d\n", id);
-}
 
     for(int i = 0; i < rowsPerThread; i++)
         free(updatedTick[i]);
