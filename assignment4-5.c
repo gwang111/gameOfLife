@@ -33,12 +33,12 @@
 #define ALIVE 1
 #define DEAD  0
 
-#define SIZE 32768
-#define NUM_THREADS 1
+#define SIZE 32
+#define NUM_THREADS 4
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
-#define PARALLEL_IO 0
-#define HEATMAP 1
+#define PARALLEL_IO 1
+#define HEATMAP 0
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
     for(int i = 0; i < NUM_THREADS-1; i++){
         pthread_join(my_threads[i], NULL);
     }
-
+    
     // Perform mpi_reduce on the alive count array
     if(mpi_myrank == 0)
         MPI_Reduce(
@@ -341,6 +341,7 @@ int main(int argc, char *argv[])
 
     /* PARALLEL I/O */
     if(PARALLEL_IO){
+        MPI_Barrier(MPI_COMM_WORLD);
         // begin timer
         if(mpi_myrank == 0)
             g_start_cycles = GetTimeBase();
@@ -364,36 +365,68 @@ int main(int argc, char *argv[])
         }
     }
 
+    free(topGhost);
+    free(bottomGhost);
+    pthread_barrier_destroy(&barrier);
+
     /* HEATMAP */
     if(HEATMAP){
-        MPI_File hFile;
-        MPI_File_open(MPI_COMM_WORLD, "heatMap.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &hFile);
-        int hI = 0;
-        int hJ = 0;
-        for(int i = 0; i < SIZE/mpi_commsize; i += 32, hI++) {
-            MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + hI) * (SIZE/32);
-            int row[SIZE/32];
-            for(int j = 0; j < SIZE; j += 32, hJ++) {
-                int count = 0;
-                for(int k = i; k < (i + 32); k++) {
-                    for(int l = j; l < (j + 32); l++) {
-                        count += myUniverse[k][l];
-                    }
+        MPI_Barrier(MPI_COMM_WORLD);
+        // reduce the columns
+        int * myReduced = calloc((SIZE/32)*(SIZE/mpi_commsize), sizeof(int));
+        int index = 0;
+        for(int row = 0; row < SIZE/mpi_commsize; row++){
+            int sum = 0;
+            int block = 31;
+            for(int i = 0; i < SIZE; i++){
+                if(i == block){
+                    myReduced[index] = sum;
+                    sum = 0;
+                    block += 32;
+                    index++;
                 }
-                row[hJ] = count;
+                sum += myUniverse[row][i];
             }
-            MPI_File_write_at(hFile, offset, row, SIZE/32 * sizeof(int), MPI_INT, MPI_STATUS_IGNORE);
-            hJ = 0;
         }
+        if(mpi_myrank == 0){
+            for(int i = 0; i < (SIZE/32)*(SIZE/mpi_commsize); i++)
+                printf("%d ", myReduced[i]);
+            printf("\n");
+        }
+
+        int * reduced = NULL;
+        if(mpi_myrank == 0){
+            reduced = calloc(SIZE*(SIZE/32), sizeof(int));
+        }
+
+        MPI_Gather(myReduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, reduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, 0, MPI_COMM_WORLD);
+        if(mpi_myrank == 0){
+            FILE * f = fopen("heatmap.txt", "w");
+
+            for(int row = 0; row < SIZE/32; row++){
+                for(int col = 0; col < SIZE/32; col++){
+                    int sum = 0;
+                    for(int i = 0; i < 32; i++){
+                        sum += reduced[row*SIZE + col + i*(SIZE/32)];
+                    }
+                    fprintf(f, "%d", sum);
+                    if(col != SIZE/32-1)
+                        fputc(' ', f);
+                }
+                if(row != SIZE/32-1)
+                    fputc('\n', f);
+            }
+
+            fclose(f);
+            free(reduced);
+        }
+        free(myReduced);
     }
 
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
     }
     free(myUniverse);
-    free(topGhost);
-    free(bottomGhost);
-    pthread_barrier_destroy(&barrier);
 
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
