@@ -37,6 +37,8 @@
 #define NUM_THREADS 1
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
+#define PARALLEL_IO 0
+#define HEATMAP 0
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -331,24 +333,41 @@ int main(int argc, char *argv[])
 
         g_end_cycles = GetTimeBase();
         g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
-        printf("%f\n", g_time_in_secs);
+        printf("TIME: %f\n", g_time_in_secs);
     }
 
     if(mpi_myrank == 0)
         free(totalAliveCount);
     
-    MPI_File cFile;
-    MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
-    for(int line = 0; line < SIZE/mpi_commsize; line++){
-        MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + line) * (SIZE+1);
-        char row[SIZE+1];
-        for(int i = 0; i < SIZE; i ++)
-            row[i] = myUniverse[line][i] + '0';
-        row[SIZE] = '\n';
-        MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
-    }
+    /* PARALLEL I/O */
+    if(PARALLEL_IO){
+        // begin timer
+        if(mpi_myrank == 0)
+            g_start_cycles = GetTimeBase();
 
-    MPI_File_close(&cFile);
+        MPI_File cFile;
+        MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
+        for(int line = 0; line < SIZE/mpi_commsize; line++){
+            MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + line) * (SIZE+1);
+            char row[SIZE+1];
+            for(int i = 0; i < SIZE; i ++)
+                row[i] = myUniverse[line][i] + '0';
+            row[SIZE] = '\n';
+            MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
+        }
+        MPI_File_close(&cFile);
+
+        if(mpi_myrank == 0){
+            g_end_cycles = GetTimeBase();
+            g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
+            printf("I/O: %f\n", g_time_in_secs);
+        }
+    }
+    
+    /* HEATMAP */
+    if(HEATMAP){
+        // gary's code here
+    }
 
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
