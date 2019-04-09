@@ -38,7 +38,7 @@
 #define NUM_GENERATIONS 256
 #define THRESHOLD .25
 #define PARALLEL_IO 1
-#define HEATMAP 1
+#define HEATMAP 0
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -46,8 +46,13 @@
 
 double g_time_in_secs = 0;
 double g_processor_frequency = 1600000000.0; // processing speed for BG/Q
-unsigned long long g_start_cycles=0;
-unsigned long long g_end_cycles=0;
+#ifdef BGQ
+    unsigned long long g_start_cycles=0;
+    unsigned long long g_end_cycles=0;
+#else
+    double g_start_cycles;
+    double g_end_cycles;
+#endif
 
 int mpi_myrank;
 int mpi_commsize;
@@ -57,6 +62,7 @@ int * topGhost;
 int * bottomGhost;
 pthread_barrier_t barrier;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+int ** updatedTick;
 
 
 // You define these
@@ -83,9 +89,6 @@ void computeGeneration(int id, int tick){
     int aliveNeigh = 0;
     int rowsPerRank = SIZE / mpi_commsize;
     int rowsPerThread = rowsPerRank / NUM_THREADS;
-    int ** updatedTick = calloc(rowsPerThread, sizeof(int *));
-    for(int i = 0; i < rowsPerThread; i++)
-        updatedTick[i] = calloc(SIZE, sizeof(int));
     double rngVal = 0;
     int randVal = 0;
 
@@ -134,10 +137,10 @@ void computeGeneration(int id, int tick){
 
                 if(myUniverse[i][j] == ALIVE) {
                   if(aliveNeigh < 2 || aliveNeigh > 3) {
-                    updatedTick[i][j] = DEAD;
+                    updatedTick[row][j] = DEAD;
                   }
                   else{
-                    updatedTick[i][j] = ALIVE;
+                    updatedTick[row][j] = ALIVE;
                   }
                   // else still alive
                 }
@@ -145,15 +148,15 @@ void computeGeneration(int id, int tick){
                 else {
                     // bring back to life if exactly 3 neighbors
                     if(aliveNeigh == 3) {
-                        updatedTick[i][j] = ALIVE;
+                        updatedTick[row][j] = ALIVE;
                     }
                     else{
-                        updatedTick[i][j] = DEAD;
+                        updatedTick[row][j] = DEAD;
                     }
 
                 }
 
-                aliveCounter += updatedTick[i][j];
+                aliveCounter += updatedTick[row][j];
             }
         }
     }
@@ -161,19 +164,13 @@ void computeGeneration(int id, int tick){
     pthread_mutex_lock(&mutex);
     aliveCount[tick] += aliveCounter;
     pthread_mutex_unlock(&mutex);
-    pthread_barrier_wait(&barrier);
-
 
 
     for(int i = 0; i < rowsPerThread; i++) {
       for(int j = 0; j < SIZE; j++) {
-        myUniverse[id * rowsPerThread + i][j] = updatedTick[i][j];
+        myUniverse[id * rowsPerThread + i][j] = updatedTick[id * rowsPerThread + i][j];
       }
     }
-
-    for(int i = 0; i < rowsPerThread; i++)
-        free(updatedTick[i]);
-    free(updatedTick);
 }
 
 // function for threads
@@ -198,29 +195,16 @@ void main_conways(){
     int mpi_flag;
 
     for(int tick = 0; tick < NUM_GENERATIONS; tick++){
-        MPI_Barrier(MPI_COMM_WORLD);
 
         // send first row up
-        MPI_Isend(myUniverse[0], SIZE, MPI_INT, mod(mpi_myrank-1, mpi_commsize), 0, MPI_COMM_WORLD, &sendTop);
+        MPI_Isend(myUniverse[0], SIZE, MPI_INT, mod(mpi_myrank-1, mpi_commsize), tick, MPI_COMM_WORLD, &sendTop);
         // receive bottom ghost
-        MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &recvBot);
+        MPI_Irecv(bottomGhost, SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, tick, MPI_COMM_WORLD, &recvBot);
         // send last row down
-        MPI_Isend(myUniverse[SIZE/mpi_commsize-1], SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, 0, MPI_COMM_WORLD, &sendBot);
+        MPI_Isend(myUniverse[SIZE/mpi_commsize-1], SIZE, MPI_INT, (mpi_myrank+1)%mpi_commsize, tick, MPI_COMM_WORLD, &sendBot);
         // receive top ghost
-        MPI_Irecv(topGhost, SIZE, MPI_INT, mod(mpi_myrank-1, mpi_commsize), 0, MPI_COMM_WORLD, &recvTop);
+        MPI_Irecv(topGhost, SIZE, MPI_INT, mod(mpi_myrank-1, mpi_commsize), tick, MPI_COMM_WORLD, &recvTop);
 
-        MPI_Wait(&sendTop, MPI_STATUS_IGNORE);
-        MPI_Test(&sendTop, &mpi_flag, MPI_STATUS_IGNORE);
-        if(!mpi_flag){
-            fprintf(stderr, "MPI error on send top\n");
-            exit(1);
-        }
-        MPI_Wait(&sendBot, MPI_STATUS_IGNORE);
-        MPI_Test(&sendBot, &mpi_flag, MPI_STATUS_IGNORE);
-        if(!mpi_flag){
-            fprintf(stderr, "MPI error on send bottom\n");
-            exit(1);
-        }
         MPI_Wait(&recvTop, MPI_STATUS_IGNORE);
         MPI_Test(&recvTop, &mpi_flag, MPI_STATUS_IGNORE);
         if(!mpi_flag){
@@ -238,6 +222,84 @@ void main_conways(){
         pthread_barrier_wait(&barrier);
         computeGeneration(0, tick);
     }
+}
+
+void inputOutput(){
+    MPI_Barrier(MPI_COMM_WORLD);
+    // begin timer
+    if(mpi_myrank == 0)
+        g_start_cycles = GetTimeBase();
+
+    MPI_File cFile;
+    MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
+    for(int line = 0; line < SIZE/mpi_commsize; line++){
+        MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + line) * (SIZE+1);
+        char row[SIZE+1];
+        for(int i = 0; i < SIZE; i ++)
+            row[i] = myUniverse[line][i] + '0';
+        row[SIZE] = '\n';
+        MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
+    }
+    MPI_File_close(&cFile);
+
+    if(mpi_myrank == 0){
+        g_end_cycles = GetTimeBase();
+        #ifdef BGQ
+            g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
+        #else
+            g_time_in_secs = (g_end_cycles - g_start_cycles);
+        #endif
+        printf("I/O: %f\n", g_time_in_secs);
+    }
+}
+
+// reduce the universe and create the heatmap
+void heatmap(){
+    MPI_Barrier(MPI_COMM_WORLD);
+    // reduce the columns
+    int * myReduced = calloc((SIZE/32)*(SIZE/mpi_commsize), sizeof(int));
+    int index = 0;
+    for(int row = 0; row < SIZE/mpi_commsize; row++){
+        int sum = 0;
+        int block = 31;
+        for(int i = 0; i < SIZE; i++){
+            if(i == block){
+                myReduced[index] = sum;
+                sum = 0;
+                block += 32;
+                index++;
+            }
+            sum += myUniverse[row][i];
+        }
+    }
+
+    int * reduced = NULL;
+    if(mpi_myrank == 0){
+        reduced = calloc(SIZE*(SIZE/32), sizeof(int));
+    }
+
+    MPI_Gather(myReduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, reduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, 0, MPI_COMM_WORLD);
+    if(mpi_myrank == 0){
+        FILE * f = fopen("heatmap.txt", "w");
+
+        for(int row = 0; row < SIZE/32; row++){
+            for(int col = 0; col < SIZE/32; col++){
+                int sum = 0;
+                for(int i = 0; i < 32; i++){
+                    sum += reduced[row*SIZE + col + i*(SIZE/32)];
+                }
+                fprintf(f, "%d", sum);
+                if(col != SIZE/32-1)
+                    fputc(' ', f);
+            }
+            if(row != SIZE/32-1)
+                fputc('\n', f);
+        }
+
+        fclose(f);
+        free(reduced);
+    }
+    free(myReduced);
 }
 
 /***************************************************************************/
@@ -278,8 +340,10 @@ int main(int argc, char *argv[])
 
     //initialize universe
     myUniverse = calloc(SIZE/mpi_commsize, sizeof(int*));
+    updatedTick = calloc(SIZE/mpi_commsize, sizeof(int*));
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         myUniverse[i] = calloc(SIZE, sizeof(int));
+        updatedTick[i] = calloc(SIZE, sizeof(int));
         for(int j = 0; j < SIZE; j++)
             myUniverse[i][j] = ALIVE;
     }
@@ -294,14 +358,13 @@ int main(int argc, char *argv[])
 
     // create threads
     int ids[NUM_THREADS];
-
     for(int i = 0; i < NUM_THREADS-1; i++){
         ids[i] = i+1;
         pthread_create(&my_threads[i], &attr, conways, (void *) &ids[i]);
     }
     main_conways();
 
-    // Perform a barrier
+    // Wait for all the threads
     for(int i = 0; i < NUM_THREADS-1; i++){
         pthread_join(my_threads[i], NULL);
     }
@@ -328,110 +391,44 @@ int main(int argc, char *argv[])
             MPI_COMM_WORLD
             );
 
-
+    // output results
     if(mpi_myrank == 0){
-
         for(int i = 0; i < NUM_GENERATIONS; i++){
             printf("Generation %d: %d alive\n", i, totalAliveCount[i]);
         }
 
         g_end_cycles = GetTimeBase();
-        g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
+        #ifdef BGQ
+            g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
+        #else
+            g_time_in_secs = (g_end_cycles - g_start_cycles);
+        #endif
         printf("TIME: %f\n", g_time_in_secs);
     }
 
-    if(mpi_myrank == 0)
-        free(totalAliveCount);
-
     /* PARALLEL I/O */
     if(PARALLEL_IO){
-        MPI_Barrier(MPI_COMM_WORLD);
-        // begin timer
-        if(mpi_myrank == 0)
-            g_start_cycles = GetTimeBase();
-
-        MPI_File cFile;
-        MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
-        for(int line = 0; line < SIZE/mpi_commsize; line++){
-            MPI_Offset offset = (mpi_myrank * (SIZE/mpi_commsize) + line) * (SIZE+1);
-            char row[SIZE+1];
-            for(int i = 0; i < SIZE; i ++)
-                row[i] = myUniverse[line][i] + '0';
-            row[SIZE] = '\n';
-            MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
-        }
-        MPI_File_close(&cFile);
-
-        if(mpi_myrank == 0){
-            g_end_cycles = GetTimeBase();
-            g_time_in_secs = ((double)(g_end_cycles - g_start_cycles)) / g_processor_frequency;
-            printf("I/O: %f\n", g_time_in_secs);
-        }
+        inputOutput();
+    }
+    /* HEATMAP */
+    if(HEATMAP){
+        heatmap();
     }
 
+    // cleanup
+    if(mpi_myrank == 0)
+        free(totalAliveCount);
     free(topGhost);
     free(bottomGhost);
     pthread_barrier_destroy(&barrier);
-
-    /* HEATMAP */
-    if(HEATMAP){
-        MPI_Barrier(MPI_COMM_WORLD);
-        // reduce the columns
-        int * myReduced = calloc((SIZE/32)*(SIZE/mpi_commsize), sizeof(int));
-        int index = 0;
-        for(int row = 0; row < SIZE/mpi_commsize; row++){
-            int sum = 0;
-            int block = 31;
-            for(int i = 0; i < SIZE; i++){
-                if(i == block){
-                    myReduced[index] = sum;
-                    sum = 0;
-                    block += 32;
-                    index++;
-                }
-                sum += myUniverse[row][i];
-            }
-        }
-
-        int * reduced = NULL;
-        if(mpi_myrank == 0){
-            reduced = calloc(SIZE*(SIZE/32), sizeof(int));
-        }
-
-        MPI_Gather(myReduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, reduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, 0, MPI_COMM_WORLD);
-        if(mpi_myrank == 0){
-            FILE * f = fopen("heatmap.txt", "w");
-
-            for(int row = 0; row < SIZE/32; row++){
-                for(int col = 0; col < SIZE/32; col++){
-                    int sum = 0;
-                    for(int i = 0; i < 32; i++){
-                        sum += reduced[row*SIZE + col + i*(SIZE/32)];
-                    }
-                    fprintf(f, "%d", sum);
-                    if(col != SIZE/32-1)
-                        fputc(' ', f);
-                }
-                if(row != SIZE/32-1)
-                    fputc('\n', f);
-            }
-
-            fclose(f);
-            free(reduced);
-        }
-        free(myReduced);
-    }
-
     for(int i = 0; i < SIZE/mpi_commsize; i++){
         free(myUniverse[i]);
+        free(updatedTick[i]);
     }
     free(myUniverse);
+    free(updatedTick);
 
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();
     return 0;
 }
-
-/***************************************************************************/
-/* Other Functions - You write as part of the assignment********************/
-/***************************************************************************/
