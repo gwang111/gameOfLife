@@ -1,6 +1,6 @@
 /***************************************************************************/
 /* Template for Asssignment 4/5 ********************************************/
-/* Team Names Here              **(*****************************************/
+/* Ryan, John, Gary             **(*****************************************/
 /***************************************************************************/
 
 /***************************************************************************/
@@ -57,11 +57,14 @@ double g_processor_frequency = 1600000000.0; // processing speed for BG/Q
 int mpi_myrank;
 int mpi_commsize;
 int aliveCount[NUM_GENERATIONS];
+//Universe
 int ** myUniverse;
+//Ghost Rows
 int * topGhost;
 int * bottomGhost;
 pthread_barrier_t barrier;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+//Updates to unverser chunks that will be copied over to the universe
 int ** updatedTick;
 
 
@@ -160,12 +163,12 @@ void computeGeneration(int id, int tick){
             }
         }
     }
-
+    //Lock and unlock when updating the alive count
     pthread_mutex_lock(&mutex);
     aliveCount[tick] += aliveCounter;
     pthread_mutex_unlock(&mutex);
 
-
+    //Copy updatedtick over to be used in next tick
     for(int i = 0; i < rowsPerThread; i++) {
       for(int j = 0; j < SIZE; j++) {
         myUniverse[id * rowsPerThread + i][j] = updatedTick[id * rowsPerThread + i][j];
@@ -230,6 +233,8 @@ void inputOutput(){
     if(mpi_myrank == 0)
         g_start_cycles = GetTimeBase();
 
+    //Basically just copying the whole universe to an outfile using MPI write at because it will synchronize between ranks
+    //Using an offset
     MPI_File cFile;
     MPI_File_open(MPI_COMM_WORLD, "output.txt", MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &cFile);
     for(int line = 0; line < SIZE/mpi_commsize; line++){
@@ -241,7 +246,8 @@ void inputOutput(){
         MPI_File_write_at(cFile, offset, row, SIZE+1, MPI_CHAR, MPI_STATUS_IGNORE);
     }
     MPI_File_close(&cFile);
-
+    //End the timer after written
+    //This should be IO time
     if(mpi_myrank == 0){
         g_end_cycles = GetTimeBase();
         #ifdef BGQ
@@ -256,7 +262,8 @@ void inputOutput(){
 // reduce the universe and create the heatmap
 void heatmap(){
     MPI_Barrier(MPI_COMM_WORLD);
-    // reduce the columns
+    //Condense by 32 for columns
+    // reduce the columns by 32 first because not dependant on rank
     int * myReduced = calloc((SIZE/32)*(SIZE/mpi_commsize), sizeof(int));
     int index = 0;
     for(int row = 0; row < SIZE/mpi_commsize; row++){
@@ -273,15 +280,18 @@ void heatmap(){
         }
     }
 
+    //Allocate the condensed universe before adding to it
     int * reduced = NULL;
     if(mpi_myrank == 0){
         reduced = calloc(SIZE*(SIZE/32), sizeof(int));
     }
 
+    //Condense by 32 for rows
+    //Gather and reduce the rows now because MPI_Gather will synchronize between ranks allow access of all rows
     MPI_Gather(myReduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, reduced, (SIZE/32)*(SIZE/mpi_commsize), MPI_INT, 0, MPI_COMM_WORLD);
     if(mpi_myrank == 0){
         FILE * f = fopen("heatmap.txt", "w");
-
+        //This is where the row reduction and output file writing happens
         for(int row = 0; row < SIZE/32; row++){
             for(int col = 0; col < SIZE/32; col++){
                 int sum = 0;
@@ -323,7 +333,7 @@ int main(int argc, char *argv[])
 	//   mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
     MPI_Barrier( MPI_COMM_WORLD );
 
-// Insert your code
+    //Variables to be used later
     pthread_t my_threads[NUM_THREADS-1];
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -391,7 +401,9 @@ int main(int argc, char *argv[])
             MPI_COMM_WORLD
             );
 
-    // output results
+    // output results and end timer
+    //This time is not I/O time
+    //Time differs from inputOutput() I/O time
     if(mpi_myrank == 0){
         for(int i = 0; i < NUM_GENERATIONS; i++){
             printf("Generation %d: %d alive\n", i, totalAliveCount[i]);
@@ -416,6 +428,7 @@ int main(int argc, char *argv[])
     }
 
     // cleanup
+    //Free what needs to be freed and exit what needs to be exited
     if(mpi_myrank == 0)
         free(totalAliveCount);
     free(topGhost);
